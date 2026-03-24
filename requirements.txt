@@ -1,0 +1,13 @@
+streamlit
+langchain
+langchain-community
+chromadb
+sentence-transformers
+docling
+pymupdf
+pyspellchecker
+rank-bm25
+google-genai
+groq
+python-dotenv
+tiktoken
