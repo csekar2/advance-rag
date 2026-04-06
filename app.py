@@ -1,13 +1,17 @@
+"""Streamlit entry point for the Advanced RAG application."""
+
 import streamlit as st
-from ingestion import run_ingestion, load_models
+from ingestion import sync_documents, load_models, get_session_id, get_session_dirs, full_reset
 from query import run_query, filter_display_sources
 import config
-import shutil
 from pathlib import Path
 
 st.set_page_config(page_title="Advanced RAG", page_icon="🔍", layout="wide")
 
-# ── Styling ────────────────────────────────────────────────────────────────
+
+# ---------------------------------------------------------------------------
+# Global CSS
+# ---------------------------------------------------------------------------
 
 st.markdown("""
 <style>
@@ -28,11 +32,17 @@ st.markdown("""
     [data-testid="stChatInput"] textarea::placeholder { color:#5ba3d9 !important; font-size:16px !important; }
     [data-testid="stChatInput"] button { background:#2196f3 !important; border-radius:10px !important; border:none !important; margin:6px !important; }
 
+    /* Right-aligned bubble for user messages */
     .user-bubble { display:flex; justify-content:flex-end; margin:8px 0; clear:both; }
     .user-bubble-inner { background:#1565c0; color:#fff; padding:12px 18px; border-radius:18px 18px 4px 18px; max-width:70%; font-size:15px; line-height:1.5; word-wrap:break-word; }
 
+    /* Left-aligned bubble for assistant answers */
     .assistant-bubble { display:flex; justify-content:flex-start; margin:8px 0; clear:both; }
     .assistant-bubble-inner { background:#1a2f4a; color:#e8eaf0; padding:14px 18px; border-radius:18px 18px 18px 4px; border:1px solid #2196f3; max-width:85%; font-size:15px; line-height:1.6; word-wrap:break-word; }
+
+    /* Left-aligned bubble for API error messages (red tint) */
+    .error-bubble { display:flex; justify-content:flex-start; margin:8px 0; clear:both; }
+    .error-bubble-inner { background:#2d1515; color:#ffcdd2; padding:14px 18px; border-radius:18px 18px 18px 4px; border:1px solid #c62828; max-width:85%; font-size:15px; line-height:1.6; }
 
     [data-testid="stFileUploader"] { background:#1a2f4a !important; border:2px dashed #2196f3 !important; border-radius:12px !important; }
     [data-testid="stFileUploader"] * { color:#e8eaf0 !important; }
@@ -53,6 +63,7 @@ st.markdown("""
     ::-webkit-scrollbar-track { background:#0d1b2a; }
     ::-webkit-scrollbar-thumb { background:#2196f3; border-radius:3px; }
 
+    /* Coloured type badges shown in the source panel */
     .badge { display:inline-block; padding:2px 10px; border-radius:20px; font-size:11px; font-weight:600; margin-right:6px; }
     .badge-text  { background:#1565c0; color:#90caf9; }
     .badge-table { background:#1b5e20; color:#a5d6a7; }
@@ -62,60 +73,43 @@ st.markdown("""
     .ready-banner h2 { font-size:2rem !important; background:linear-gradient(135deg,#2196f3,#42a5f5); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:8px !important; }
     .ready-banner p  { color:#546e7a; font-size:1rem; }
 
-    /*
-     * Author credit bar — pinned to the absolute bottom of the sidebar.
-     * Uses position:fixed so it stays put regardless of sidebar scroll height.
-     * Everything (name + both links) is on a single flex row.
-     */
+    /* Author credit bar — fixed to the very bottom of the sidebar, single row */
     .author-bar {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 244px;           /* matches Streamlit's default sidebar width */
-        background: #0d1b2a;
-        border-top: 1px solid #1e3a5f;
-        padding: 8px 16px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        z-index: 999;
-        box-sizing: border-box;
+        position: fixed; bottom: 0; left: 0; width: 244px;
+        background: #0d1b2a; border-top: 1px solid #1e3a5f;
+        padding: 8px 16px; display: flex; align-items: center;
+        gap: 10px; z-index: 999; box-sizing: border-box;
     }
-    .author-bar .name {
-        color: #90caf9;
-        font-size: 12px;
-        font-weight: 600;
-        white-space: nowrap;
-    }
-    .author-bar a {
-        color: #5ba3d9;
-        text-decoration: none;
-        font-size: 11px;
-        display: flex;
-        align-items: center;
-        gap: 3px;
-        white-space: nowrap;
-    }
-    .author-bar a:hover { color: #42a5f5; }
-    .author-bar svg { flex-shrink: 0; }
+    .author-bar .name { color:#90caf9; font-size:12px; font-weight:600; white-space:nowrap; }
+    .author-bar a { color:#5ba3d9; text-decoration:none; font-size:11px; display:flex; align-items:center; gap:3px; white-space:nowrap; }
+    .author-bar a:hover { color:#42a5f5; }
+    .author-bar svg { flex-shrink:0; }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ── Session initialisation ─────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Session initialisation
+# The embedding model is cached. Session setup creates isolated folders per browser session.
+# ---------------------------------------------------------------------------
 
-embedder = load_models()
+embedder   = load_models()
+session_id = get_session_id()
+upload_dir, images_dir, markdown_dir = get_session_dirs(session_id)
+
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 
 
-# ── Sidebar ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Sidebar
+# ---------------------------------------------------------------------------
 
 with st.sidebar:
     st.markdown("## 🔍 Advanced RAG")
     st.markdown("---")
-    st.markdown("### 📂 Upload Documents")
-    st.caption("Supported: PDF · DOCX · TXT")
+    st.markdown("### 📂 Documents")
+    st.caption("PDF · DOCX · TXT  |  Add or remove files below")
 
     uploaded_files = st.file_uploader(
         "Upload",
@@ -125,43 +119,32 @@ with st.sidebar:
         key=f"uploader_{st.session_state.uploader_key}"
     )
 
-    if uploaded_files:
-        st.markdown(f"**{len(uploaded_files)} file(s) selected**")
-        if st.button("⚡ Process Documents"):
-            run_ingestion(uploaded_files)
+    # Sync only when the uploaded file set changes.
+    if uploaded_files is not None:
+        prev_names = st.session_state.get("_last_uploaded_names", set())
+        curr_names = {f.name for f in uploaded_files}
+        if curr_names != prev_names:
+            sync_documents(
+                uploaded_files, embedder, session_id,
+                upload_dir, images_dir, markdown_dir
+            )
+            st.session_state["_last_uploaded_names"] = curr_names
 
     st.markdown("---")
 
-    if st.button("🗑️ Clear All"):
-        try:
-            from chromadb import PersistentClient
-            cc = PersistentClient(path=config.CHROMA_DIR)
-            for c in cc.list_collections():
-                cc.delete_collection(c.name)
-        except Exception:
-            pass
-        for folder in [config.UPLOAD_DIR, config.IMAGES_DIR,
-                       config.MARKDOWN_DIR, config.CHROMA_DIR]:
-            shutil.rmtree(folder, ignore_errors=True)
-            Path(folder).mkdir(parents=True, exist_ok=True)
-        try:
-            import chromadb
-            chromadb.api.client.SharedSystemClient.clear_system_cache()
-        except Exception:
-            pass
-        uploader_key = st.session_state.uploader_key + 1
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.session_state.uploader_key = uploader_key
+    # Restart: wipes all data from disk and memory, returns to the welcome screen.
+    if st.button("🔄 Restart"):
+        full_reset()
         st.rerun()
 
     st.markdown("---")
     st.markdown(
-        "<p style='font-size:11px;color:#546e7a;text-align:center'>Docling · ChromaDB · Groq · BGE</p>",
+        "<p style='font-size:11px;color:#546e7a;text-align:center'>"
+        "Docling · ChromaDB · Groq · BGE</p>",
         unsafe_allow_html=True
     )
 
-    # Author credit — fixed to the absolute bottom of the sidebar, single row
+    
     st.markdown("""
     <div class="author-bar">
         <span class="name">Charu Nethra Sekar</span>
@@ -179,12 +162,22 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 
-# ── Message renderer ───────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Message renderer
+# Render a chat bubble and, for assistant answers, the source panel
+# ---------------------------------------------------------------------------
 
 def render_message(role, content, sources=None):
+    is_error = isinstance(content, str) and content.startswith(("❌", "⏳", "🚫"))
+
     if role == "user":
         st.markdown(
             f"<div class='user-bubble'><div class='user-bubble-inner'>{content}</div></div>",
+            unsafe_allow_html=True
+        )
+    elif is_error:
+        st.markdown(
+            f"<div class='error-bubble'><div class='error-bubble-inner'>{content}</div></div>",
             unsafe_allow_html=True
         )
     else:
@@ -216,7 +209,10 @@ def render_message(role, content, sources=None):
                         st.divider()
 
 
-# ── Welcome screen ─────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Welcome screen
+# Shown when no documents are currently loaded.
+# ---------------------------------------------------------------------------
 
 def show_welcome():
     st.markdown("""
@@ -243,9 +239,14 @@ def show_welcome():
     st.info("👈 Upload documents in the sidebar to get started")
 
 
-# ── Main chat area ─────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Main chat area
+# Shown once at least one document has been indexed.
+# ---------------------------------------------------------------------------
 
-if "chroma_collection" not in st.session_state:
+has_docs = bool(st.session_state.get("_ingested_chunks"))
+
+if not has_docs:
     show_welcome()
 else:
     if "messages" not in st.session_state:
@@ -255,7 +256,7 @@ else:
         st.markdown("""
         <div class='ready-banner'>
             <h2>✦ Your documents are ready</h2>
-            <p>Ask anything — summaries, facts, tables, figures, comparisons</p>
+            <p>Ask anything — summaries, facts, tables, figures, comparisons across all loaded documents</p>
         </div>""", unsafe_allow_html=True)
 
     for msg in st.session_state.messages:

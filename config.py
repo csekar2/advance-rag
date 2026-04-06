@@ -1,40 +1,65 @@
+"""
+config.py
+Central configuration for the Advanced RAG application.
+"""
+
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# API keys loaded from .env file
+# ---------------------------------------------------------------------------
+# API Keys  (loaded from .env — never hard-code these)
+# ---------------------------------------------------------------------------
 GROQ_API_KEY   = os.getenv("GROQ_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Model names — change these to swap providers without touching other files
-GROQ_STANDALONE_MODEL = "llama-3.1-8b-instant"   # lightweight, used only for question rewriting
-GROQ_ANSWER_MODEL     = "llama-3.3-70b-versatile" # main answering model
-GEMINI_MODEL          = "models/gemini-2.5-flash"  # used to describe extracted images
-EMBEDDING_MODEL       = "BAAI/bge-base-en-v1.5"   # sentence embedding model for dense retrieval
-RERANKER_MODEL        = "BAAI/bge-reranker-base"   # cross-encoder for reranking retrieved chunks
+# ---------------------------------------------------------------------------
+# Model names
+# ---------------------------------------------------------------------------
+GROQ_STANDALONE_MODEL = "llama-3.1-8b-instant"    # lightweight rewriter for follow-up questions
+GROQ_ANSWER_MODEL     = "llama-3.3-70b-versatile"  # main answering model
+GEMINI_MODEL          = "models/gemini-2.5-flash"   # used to describe extracted images
+EMBEDDING_MODEL       = "BAAI/bge-base-en-v1.5"    # local sentence embedding model
+RERANKER_MODEL        = "BAAI/bge-reranker-base"    # local cross-encoder reranker
 
-# Chunking — CHUNK_SIZE is in characters (matches RecursiveCharacterTextSplitter)
+# ---------------------------------------------------------------------------
+# Chunking
+# Chunk sizes are in characters because RecursiveCharacterTextSplitter uses characters.
+# ---------------------------------------------------------------------------
 CHUNK_SIZE    = 1500
 CHUNK_OVERLAP = 150
 
-# Retrieval — how many candidates to fetch before reranking, and how many to keep after
+# ---------------------------------------------------------------------------
+# Retrieval
+# Number of chunks kept at each retrieval stage
+# ---------------------------------------------------------------------------
 RETRIEVAL_TOP_K = 20
 RERANKER_TOP_K  = 5
 
-# Relevance gate — bge-reranker-base outputs raw logits (not probabilities).
-# Positive = relevant, large negative = irrelevant.
-# Answers are suppressed only when the top reranker score falls below this value.
-# Raise toward 0.0 if you see hallucinated answers on weak context.
+# ---------------------------------------------------------------------------
+# Relevance gate
+# Minimum reranker score required before generating an answer
+# ---------------------------------------------------------------------------
 RELEVANCE_THRESHOLD = -5.0
 
-# Source display — logit threshold above which a source is shown in the UI.
-# Sources scoring below this are hidden to keep the panel clean.
-# At least one source is always shown regardless of score.
+# ---------------------------------------------------------------------------
+# Source panel display
+# Controls how many source cards are shown in the UI.
+# ---------------------------------------------------------------------------
 DISPLAY_SCORE_THRESHOLD = 0.0
 MAX_DISPLAY_SOURCES     = 3
 
-# Local storage paths
+# ---------------------------------------------------------------------------
+# Gemini rate-limit retry
+# Retry settings for Gemini image description on rate limits
+# ---------------------------------------------------------------------------
+GEMINI_MAX_RETRIES        = 3
+GEMINI_RETRY_WAIT_SECONDS = 62   # slightly over 60 s to clear the per-minute window
+
+# ---------------------------------------------------------------------------
+# Local storage paths  (session subfolders are created inside each of these)
+# ---------------------------------------------------------------------------
 UPLOAD_DIR   = "data/uploads"
 IMAGES_DIR   = "data/images"
 MARKDOWN_DIR = "data/markdown"
