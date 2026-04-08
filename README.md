@@ -26,7 +26,7 @@ This system solves it using a **markdown-first pipeline with content-aware chunk
 
 ## Demo
 
-> _Coming soon_
+>  🎥 Watch full demo:  [Google Drive Link](https://drive.google.com/file/d/17psmpRrAuLVFwzI_ILMrf6a5MJ5rQIxs/view?usp=sharing)
 
 ---
 
